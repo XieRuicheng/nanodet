@@ -4,7 +4,7 @@
 //
 
 #include "nanodet.h"
-#include <ncnn/benchmark.h>
+#include <benchmark.h>
 // #include <iostream>
 
 inline float fast_exp(float x) 
@@ -40,14 +40,16 @@ int activation_function_softmax(const _Tp* src, _Tp* dst, int length)
     return 0;
 }
 
-bool NanoDet::hasGPU = true;
+bool NanoDet::hasGPU = false;
 NanoDet* NanoDet::detector = nullptr;
 
 NanoDet::NanoDet(const char* param, const char* bin, bool useGPU)
 {
     this->Net = new ncnn::Net();
     // opt 
+#if NCNN_VULKAN
     this->hasGPU = ncnn::get_gpu_count() > 0;
+#endif
     this->Net->opt.use_vulkan_compute = this->hasGPU && useGPU;
     this->Net->opt.use_fp16_arithmetic = true;
     this->Net->load_param(param);
@@ -82,8 +84,9 @@ std::vector<BoxInfo> NanoDet::detect(cv::Mat image, float score_threshold, float
     auto ex = this->Net->create_extractor();
     ex.set_light_mode(false);
     ex.set_num_threads(4);
-    //this->hasGPU = ncnn::get_gpu_count() > 0;
-    //ex.set_vulkan_compute(this->hasGPU);
+#if NCNN_VULKAN
+    ex.set_vulkan_compute(this->hasGPU);
+#endif
     ex.input("input.1", input);
 
     std::vector<std::vector<BoxInfo>> results;
@@ -120,8 +123,8 @@ std::vector<BoxInfo> NanoDet::detect(cv::Mat image, float score_threshold, float
 
 void NanoDet::decode_infer(ncnn::Mat& cls_pred, ncnn::Mat& dis_pred, int stride, float threshold, std::vector<std::vector<BoxInfo>>& results)
 {
-    int feature_h = this->input_size / stride;
-    int feature_w = this->input_size / stride;
+    int feature_h = this->input_size[1] / stride;
+    int feature_w = this->input_size[0] / stride;
 
     //cv::Mat debug_heatmap = cv::Mat(feature_h, feature_w, CV_8UC3);
     for (int idx = 0; idx < feature_h * feature_w; idx++)
@@ -173,8 +176,8 @@ BoxInfo NanoDet::disPred2Bbox(const float*& dfl_det, int label, float score, int
     }
     float xmin = (std::max)(ct_x - dis_pred[0], .0f);
     float ymin = (std::max)(ct_y - dis_pred[1], .0f);
-    float xmax = (std::min)(ct_x + dis_pred[2], (float)this->input_size);
-    float ymax = (std::min)(ct_y + dis_pred[3], (float)this->input_size);
+    float xmax = (std::min)(ct_x + dis_pred[2], (float)this->input_size[0]);
+    float ymax = (std::min)(ct_y + dis_pred[3], (float)this->input_size[1]);
 
     //std::cout << xmin << "," << ymin << "," << xmax << "," << xmax << "," << std::endl;
     return BoxInfo { xmin, ymin, xmax, ymax, score, label };
